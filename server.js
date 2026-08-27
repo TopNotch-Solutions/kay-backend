@@ -87,6 +87,7 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 
 const { ensureRolesSynced } = require('./services/roleSyncService');
+const { ensureUserReportsSchema } = require('./services/ensureUserReportsSchema');
 const { ensureReportUploadDirs } = require('./utils/reportUploads');
 
 ensureReportUploadDirs();
@@ -94,6 +95,10 @@ ensureReportUploadDirs();
 sequelize.authenticate()
   .then(() => {
     console.log('Database connected successfully');
+    return ensureUserReportsSchema();
+  })
+  .then(() => {
+    console.log('User reports schema ready');
     return ensureRolesSynced();
   })
   .then(() => {
