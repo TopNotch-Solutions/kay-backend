@@ -497,17 +497,8 @@ exports.getHistory = async (req, res) => {
       where: { patient_id: req.params.id },
       include: [
         { association: 'vitals' },
-        { association: 'screeningAssessment' },
-        { association: 'hivTestResult' },
-        { association: 'artEpisode' },
-        { association: 'prepEpisode' },
-        { association: 'dermatologyAssessment' },
-        { association: 'papSmearScreening' },
         { association: 'consultations' },
         { association: 'prescriptions' },
-        { association: 'labRequests' },
-        { association: 'sonarRequests' },
-        { association: 'admission' },
       ],
       order: [['created_at', 'DESC']],
     });

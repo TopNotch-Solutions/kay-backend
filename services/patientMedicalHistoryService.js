@@ -239,9 +239,11 @@ function consultationsClinical(visit) {
   const rows = (visit.consultations || []).map((c) =>
     pick(c, ['diagnosis', 'notes', 'actions_taken', 'dental_exam', 'created_at'])
   ).filter(Boolean);
-  if (!rows.length && !(visit.prescriptions || []).length) return null;
+  if (!rows.length && !(visit.prescriptions || []).length && !visit.vitals) return null;
 
   const out = {};
+  const vitals = sanitizeVitals(visit.vitals);
+  if (vitals) out.vitals = vitals;
   if (rows.length) out.consultations = rows;
   if (visit.prescriptions?.length) {
     out.prescriptions = visit.prescriptions.map((rx) => ({
@@ -604,38 +606,14 @@ async function getClinicalMedicalHistory(patientId, facilityId) {
   const where = { patient_id: patientId };
   if (facilityId) where.facility_id = facilityId;
 
+  // Kay One Dental: only clinic tables (no hospital/specialty modules).
   const visits = await Visit.findAll({
     where,
     include: [
       { association: 'facility', attributes: ['id', 'name'] },
       { association: 'vitals', required: false },
-      { association: 'screeningAssessment' },
-      { association: 'papSmearScreening' },
-      { association: 'socialWorkerAssessment' },
-      { association: 'pediatricAssessment' },
-      { association: 'hivTestResult' },
-      { association: 'familyPlanningRecord' },
-      { association: 'prepEpisode' },
-      { association: 'artEpisode' },
-      { association: 'dermatologyAssessment' },
-      { association: 'emergencyInterventions' },
       { association: 'consultations' },
       { association: 'prescriptions', include: [{ association: 'items' }] },
-      { association: 'labRequests' },
-      { association: 'sonarRequests' },
-      { association: 'maternityEpisode' },
-      { association: 'maternityAncSessions', separate: true, order: [['session_number', 'ASC']] },
-      { association: 'maternityAnwRecords', separate: true, order: [['record_date', 'ASC']] },
-      { association: 'maternityPnwRecords', separate: true, order: [['record_date', 'ASC']] },
-      { association: 'maternityIcuRecords', separate: true, order: [['record_date', 'ASC']] },
-      { association: 'maternityNicuRecords', separate: true, order: [['created_at', 'ASC']] },
-      {
-        association: 'clinicHospitalTransfer',
-        required: false,
-        include: [{ association: 'hospitalFacility', attributes: ['id', 'name'] }],
-      },
-      { association: 'referrals', required: false },
-      { association: 'mortuaryRecord', required: false },
     ],
     order: [['created_at', 'DESC']],
   });
@@ -660,37 +638,7 @@ async function getClinicalMedicalHistory(patientId, facilityId) {
     order: [['created_at', 'ASC']],
   });
 
-  const admissions = await Admission.findAll({
-    where: { visit_id: visitIds },
-    include: [
-      {
-        association: 'bed',
-        attributes: ['id', 'bed_number', 'room_number', 'ward_id'],
-        include: [{ association: 'ward', attributes: ['id', 'name', 'ward_type'] }],
-      },
-      {
-        association: 'icuDailyRecords',
-        separate: true,
-        order: [['record_date', 'ASC'], ['created_at', 'ASC']],
-      },
-      {
-        association: 'surgicalComplexDailyRecords',
-        separate: true,
-        order: [['record_date', 'ASC'], ['created_at', 'ASC']],
-      },
-      {
-        association: 'specializedInpatientDailyRecords',
-        separate: true,
-        order: [['record_date', 'ASC'], ['created_at', 'ASC']],
-      },
-      {
-        association: 'adultOutpatientDailyRecords',
-        separate: true,
-        order: [['record_date', 'ASC'], ['created_at', 'ASC']],
-      },
-    ],
-    order: [['admitted_at', 'ASC']],
-  });
+  const admissions = [];
 
   return {
     visits: visits.map((visit) => serializeVisit(visit, queueEntries, admissions)),
