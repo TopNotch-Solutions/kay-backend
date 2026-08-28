@@ -121,8 +121,42 @@ sequelize.authenticate()
     }
     server.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
-      const { startClinicVisitExpiryScheduler } = require('./services/clinicVisitExpiryService');
+      const {
+        startClinicVisitExpiryScheduler,
+        expireVisitsBeforeClinicDayGlobally,
+        expireStaleClinicVisitsGlobally,
+        closeStaleQueueEntriesBeforeClinicDay,
+      } = require('./services/clinicVisitExpiryService');
       const { startFollowUpReminderScheduler } = require('./services/followUpReminderService');
+
+      (async () => {
+        try {
+          const { Facility } = require('./models');
+          const endOfDay = await expireVisitsBeforeClinicDayGlobally();
+          const stale = await expireStaleClinicVisitsGlobally();
+          const { Op } = require('sequelize');
+          const clinics = await Facility.findAll({
+            where: { type: { [Op.in]: ['clinic', 'health_center'] } },
+            attributes: ['id'],
+          });
+          let queueClosed = 0;
+          for (const clinic of clinics) {
+            queueClosed += await closeStaleQueueEntriesBeforeClinicDay(clinic.id, 'doctor');
+          }
+          if (endOfDay > 0) {
+            console.log(`Startup: closed ${endOfDay} in-progress visit(s) from before today`);
+          }
+          if (queueClosed > 0) {
+            console.log(`Startup: removed ${queueClosed} stale doctor queue row(s) from before today`);
+          }
+          if (stale > 0) {
+            console.log(`Startup: closed ${stale} visit(s) past the 24-hour window`);
+          }
+        } catch (err) {
+          console.error('Startup visit cleanup error:', err.message);
+        }
+      })();
+
       startClinicVisitExpiryScheduler();
       startFollowUpReminderScheduler();
     });

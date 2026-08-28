@@ -7,6 +7,7 @@ const { getMaternityMedicalHistory } = require('./maternityMedicalHistoryService
 const { MATERNITY_DEPARTMENTS } = require('../config/maternityConfig');
 
 const MATERNITY_DEPT_SET = new Set(Object.values(MATERNITY_DEPARTMENTS));
+const EXCLUDED_EXPORT_DEPARTMENTS = new Set(['billing', 'front_office']);
 const USER_ATTRS = ['id', 'first_name', 'last_name'];
 
 function userName(user) {
@@ -247,7 +248,7 @@ function scopeLabel(scope) {
   return 'All records';
 }
 
-function buildRowsFromHistory({ patient, facilityLabel, history, visitById, scope }) {
+function buildRowsFromHistory({ patient, facilityLabel, history, visitById, scope, excludePaymentSummary = false }) {
   const patientLabel = [patient.first_name, patient.last_name].filter(Boolean).join(' ').trim();
   const label = scopeLabel(scope);
   const rows = [];
@@ -256,6 +257,7 @@ function buildRowsFromHistory({ patient, facilityLabel, history, visitById, scop
     const visitModel = visitById.get(visit.id);
     const visitFacility = visit.facility_name || visitModel?.facility?.name || facilityLabel || '';
     (visit.stops || []).forEach((stop) => {
+      if (excludePaymentSummary && EXCLUDED_EXPORT_DEPARTMENTS.has(stop.department)) return;
       const attendees = visitModel
         ? resolveAttendees(stop._queueEntry, visitModel, stop.department)
         : (stop.assigned_to_name || '');
@@ -296,7 +298,8 @@ function buildRowsFromHistory({ patient, facilityLabel, history, visitById, scop
   return rows;
 }
 
-async function buildMedicalHistoryXlsx(patientId, facilityId, scope = 'all') {
+async function buildMedicalHistoryXlsx(patientId, facilityId, scope = 'all', options = {}) {
+  const { excludePaymentSummary = false } = options;
   const [patient, history, visits] = await Promise.all([
     Patient.findByPk(patientId),
     getAdminMedicalHistory(patientId, facilityId || null, scope),
@@ -331,6 +334,7 @@ async function buildMedicalHistoryXlsx(patientId, facilityId, scope = 'all') {
     history: enriched,
     visitById,
     scope,
+    excludePaymentSummary,
   });
 
   const sheet = XLSX.utils.json_to_sheet(rows.length ? rows : [{

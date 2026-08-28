@@ -477,10 +477,12 @@ exports.getClinicalMedicalHistory = async (req, res) => {
 exports.getMedicalCard = async (req, res) => {
   try {
     const visitId = (req.query.visit_id || '').trim() || null;
+    const includeBilling = req.query.exclude_payment !== '1';
     const card = await buildMedicalCardDocument(req.params.id, {
       facilityId: req.user.facility_id,
       visitId,
       allFacilities: false,
+      includeBilling,
     });
     return success(res, card);
   } catch (err) {

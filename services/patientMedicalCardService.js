@@ -89,7 +89,12 @@ function formatFacility(facility) {
  * @param {{ facilityId?: string|null, visitId?: string|null, allFacilities?: boolean }} options
  */
 async function buildMedicalCardDocument(patientId, options = {}) {
-  const { facilityId = null, visitId = null, allFacilities = false } = options;
+  const {
+    facilityId = null,
+    visitId = null,
+    allFacilities = false,
+    includeBilling = true,
+  } = options;
   const resolvedFacilityId = allFacilities ? null : facilityId;
 
   const patient = await Patient.findByPk(patientId);
@@ -139,7 +144,9 @@ async function buildMedicalCardDocument(patientId, options = {}) {
     visits = visits.filter((visit) => visit.id === visitId);
   }
 
-  const billByVisit = await loadBillsForVisits(visits.map((visit) => visit.id));
+  const billByVisit = includeBilling
+    ? await loadBillsForVisits(visits.map((visit) => visit.id))
+    : new Map();
 
   const scope = visitId ? 'visit' : 'all';
   const patientName = [patient.first_name, patient.last_name].filter(Boolean).join(' ').trim();

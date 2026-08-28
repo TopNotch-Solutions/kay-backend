@@ -6,6 +6,14 @@ const { auditMiddleware } = require('../middleware/audit');
 
 router.use(authenticate);
 
+router.get('/appointments', authorize('consultation', 'read'), doctorController.listAppointments);
+router.post(
+  '/appointments/:consultationId/cancel',
+  authorize('consultation', 'update'),
+  auditMiddleware('consultation'),
+  doctorController.cancelAppointment
+);
+
 // Consultations
 router.post('/', authorize('consultation', 'create'), auditMiddleware('consultation'), doctorController.createConsultation);
 router.get('/visit/:visitId', authorize('consultation', 'read'), doctorController.getByVisit);

@@ -7,12 +7,15 @@ const {
   expireStaleClinicVisitsAtFacility,
   assertClinicVisitNotExpired,
   getVisitExpiryInfo,
+  expireVisitsBeforeClinicDayAtFacility,
+  startOfClinicDay,
+  closeStaleQueueEntriesBeforeClinicDay,
 } = require('./clinicVisitExpiryService');
 const {
   expireStaleHospitalVisitsAtFacility,
   assertHospitalVisitNotExpired,
 } = require('./hospitalVisitExpiryService');
-const { isClinicFacility, isHospitalFacility } = require('../config/clinicRoles');
+const { isClinicFacility, isHospitalFacility, isOutpatientDayBoundFacility } = require('../config/clinicRoles');
 
 const ACTIVE_QUEUE_STATUSES = ['waiting', 'in_progress'];
 
@@ -151,12 +154,19 @@ async function pushToQueue({ visit_id, department, priority = 'normal', pushed_b
 async function getQueue(department, facilityId) {
   const visitService = require('./visitService');
   const facility = await require('../models').Facility.findByPk(facilityId, { attributes: ['id', 'type'] });
-  if (isClinicFacility(facility)) {
+  if (isOutpatientDayBoundFacility(facility)) {
+    await expireVisitsBeforeClinicDayAtFacility(facilityId);
+    await closeStaleQueueEntriesBeforeClinicDay(facilityId, department);
     await expireStaleClinicVisitsAtFacility(facilityId);
   } else if (isHospitalFacility(facility)) {
     await expireStaleHospitalVisitsAtFacility(facilityId);
   }
   await visitService.reconcileDepartmentStaleVisits(facilityId, department);
+
+  const visitWhere = { facility_id: facilityId };
+  if (isOutpatientDayBoundFacility(facility)) {
+    visitWhere.created_at = { [Op.gte]: startOfClinicDay() };
+  }
 
   const entries = await QueueEntry.findAll({
     where: {
@@ -166,7 +176,7 @@ async function getQueue(department, facilityId) {
     include: [
       {
         association: 'visit',
-        where: { facility_id: facilityId },
+        where: visitWhere,
         include: [
           {
             model: Patient,
@@ -195,7 +205,7 @@ async function getQueue(department, facilityId) {
     ],
   });
 
-  if (isClinicFacility(facility)) {
+  if (isOutpatientDayBoundFacility(facility)) {
     return entries.map((entry) => {
       const plain = entry.toJSON();
       if (plain.visit) {

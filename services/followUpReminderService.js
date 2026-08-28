@@ -107,6 +107,10 @@ function patientPhone(patient) {
   return normalizePhone(patient.cell_phone || patient.phone || patient.telephone || '');
 }
 
+function isFollowUpCancelled(followUp) {
+  return String(followUp?.status || '').toLowerCase() === 'cancelled';
+}
+
 /**
  * Replace pending reminders for a consultation based on dental_exam.follow_up.
  * Cancels pending rows when follow-up is cleared.
@@ -123,6 +127,20 @@ async function syncFollowUpReminders({
   const dentalExam = consultation.dental_exam
     || (typeof consultation.get === 'function' ? consultation.get('dental_exam') : null);
   const followUp = dentalExam?.follow_up || null;
+
+  if (isFollowUpCancelled(followUp)) {
+    const [cancelled] = await FollowUpReminder.update(
+      { status: 'cancelled' },
+      {
+        where: {
+          consultation_id: consultation.id,
+          status: 'pending',
+        },
+        transaction,
+      }
+    );
+    return { scheduled: 0, cancelled };
+  }
 
   let validated = null;
   try {
@@ -279,6 +297,8 @@ module.exports = {
   todayInClinicTz,
   parseFollowUpAt,
   assertFollowUpIsFuture,
+  formatFollowUpDisplay,
+  patientPhone,
   syncFollowUpReminders,
   processDueFollowUpReminders,
   startFollowUpReminderScheduler,

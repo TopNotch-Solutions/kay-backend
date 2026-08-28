@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const { User, Role, RefreshToken, AuditLog, Facility } = require('../models');
 const { success, error } = require('../utils/response');
+const { displayKayOneFacilityName } = require('../utils/kayOneFacilityResolver');
 const {
   requestForgotPasswordOtp,
   resetPasswordWithOtp,
@@ -88,7 +89,7 @@ exports.login = async (req, res) => {
         role: user.role.name,
         role_display: user.role.display_name,
         facility_id: user.facility_id,
-        facility_name: user.facility?.name || null,
+        facility_name: displayKayOneFacilityName(user.facility?.name),
         facility_type: user.facility?.type || null,
         must_change_password: Boolean(user.must_change_password),
       },

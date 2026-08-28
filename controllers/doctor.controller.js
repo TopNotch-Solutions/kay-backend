@@ -28,6 +28,10 @@ const { applyClinicalTransferPlan } = require('../services/clinicHospitalTransfe
 const { validateDiagnosis, CLINIC_DOCTOR_DEPARTMENT } = require('../config/clinicDoctorRouting');
 const { assertFollowUpIsFuture, syncFollowUpReminders } = require('../services/followUpReminderService');
 const {
+  listFutureAppointmentsForDoctor,
+  cancelFollowUpAppointment,
+} = require('../services/followUpAppointmentService');
+const {
   resolveDischargeDiagnosis,
   buildRefusalDischargeNotes,
   refusalDischargeActionsTaken,
@@ -100,6 +104,7 @@ function normalizeDentalExam(raw) {
         date: validated.date,
         time: validated.time,
         notes: validated.notes,
+        status: 'scheduled',
       };
     }
   }
@@ -2241,5 +2246,49 @@ exports.clinicDischargePatient = async (req, res) => {
     if (!t.finished) await t.rollback();
     console.error('Clinic discharge error:', err);
     return error(res, err.message || 'Failed to discharge patient', 500);
+  }
+};
+
+exports.listAppointments = async (req, res) => {
+  try {
+    const data = await listFutureAppointmentsForDoctor(req.user.id);
+    return success(res, data);
+  } catch (err) {
+    console.error('List appointments error:', err);
+    return error(res, err.message || 'Failed to load appointments', 500);
+  }
+};
+
+exports.cancelAppointment = async (req, res) => {
+  try {
+    const {
+      reason,
+      reschedule,
+      follow_up_date,
+      follow_up_time,
+    } = req.body || {};
+    const result = await cancelFollowUpAppointment({
+      consultationId: req.params.consultationId,
+      doctorId: req.user.id,
+      reason,
+      reschedule: Boolean(reschedule),
+      follow_up_date,
+      follow_up_time,
+    });
+    let message;
+    if (result.rescheduled) {
+      message = result.sms_sent
+        ? 'Appointment rescheduled and SMS sent to the patient.'
+        : 'Appointment rescheduled. Patient has no cell phone on file — SMS was not sent.';
+    } else {
+      message = result.sms_sent
+        ? 'Appointment cancelled and SMS sent to the patient.'
+        : 'Appointment cancelled. Patient has no cell phone on file — SMS was not sent.';
+    }
+    return success(res, result, message);
+  } catch (err) {
+    console.error('Cancel appointment error:', err);
+    const status = err.status || 500;
+    return error(res, err.message || 'Failed to cancel appointment', status);
   }
 };

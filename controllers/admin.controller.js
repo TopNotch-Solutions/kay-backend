@@ -34,7 +34,8 @@ async function sendEmployeeTempPasswordSms(phone, firstName, tempPassword) {
   await callExternalApi(destination, message);
   return destination;
 }
-const { resolveNationalAdminFacility, NATIONAL_ADMIN_FACILITY_NAME } = require('../utils/nationalAdmin');
+const { NATIONAL_ADMIN_FACILITY_NAME } = require('../utils/nationalAdmin');
+const { resolveKayOneFacility, getKayOneFacilityId, displayKayOneFacilityName, KAY_ONE_FACILITY_NAME } = require('../utils/kayOneFacilityResolver');
 const { ensureRolesSynced } = require('../services/roleSyncService');
 const {
   CLINIC_DEPARTMENT_DEFINITIONS,
@@ -110,9 +111,15 @@ function serializeUserRow(row) {
   const openAssignment = (plain.facilityAssignments || []).find((a) => !a.ended_at)
     || plain.facilityAssignments?.[0];
   const isSa = plain.role?.name === 'system_admin';
+  if (plain.facility?.name) {
+    plain.facility = {
+      ...plain.facility,
+      name: displayKayOneFacilityName(plain.facility.name),
+    };
+  }
   return {
     ...plain,
-    admin_scope: isSa ? 'national' : null,
+    admin_scope: isSa ? 'facility' : null,
     registered_by: formatAdminUserName(plain.createdBy),
     assigned_by: formatAdminUserName(openAssignment?.transferredBy),
   };
@@ -164,16 +171,8 @@ async function getNationalOfficeFacilityId() {
 }
 
 async function fetchFacilitySummaries() {
-  const nationalOfficeId = await getNationalOfficeFacilityId();
-  const facilityWhere = nationalOfficeId
-    ? { id: { [Op.ne]: nationalOfficeId } }
-    : { name: { [Op.ne]: NATIONAL_ADMIN_FACILITY_NAME } };
-
-  const facilities = await Facility.findAll({
-    where: facilityWhere,
-    order: [['name', 'ASC']],
-    attributes: ['id', 'name', 'type', 'province', 'district'],
-  });
+  const facility = await resolveKayOneFacility();
+  const facilities = [facility];
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -294,12 +293,8 @@ async function fetchDashboardAnalytics(facilityId = null) {
   };
 
   const staffWhere = { is_active: true };
-  if (facilityId) {
-    staffWhere.facility_id = facilityId;
-  } else {
-    const nationalOfficeId = await getNationalOfficeFacilityId();
-    if (nationalOfficeId) staffWhere.facility_id = { [Op.ne]: nationalOfficeId };
-  }
+  const kayOneId = await getKayOneFacilityId();
+  staffWhere.facility_id = facilityId || kayOneId;
 
   const [
     visitsRaw,
@@ -664,7 +659,7 @@ exports.createUser = async (req, res) => {
     }
 
     const targetFacilityId = isSystemAdmin(req)
-      ? facility_id
+      ? await getKayOneFacilityId()
       : req.user.facility_id;
     if (!targetFacilityId) {
       return error(res, 'facility_id is required', 400);
@@ -778,11 +773,11 @@ exports.createSystemAdmin = async (req, res) => {
     const password_hash = await bcrypt.hash(tempPassword, 10);
 
     const user = await sequelize.transaction(async (transaction) => {
-      const nationalFacility = await resolveNationalAdminFacility(transaction);
+      const kayOneFacility = await resolveKayOneFacility(transaction);
 
       const createdUser = await User.create({
         id: uuidv4(),
-        facility_id: nationalFacility.id,
+        facility_id: kayOneFacility.id,
         role_id: role.id,
         employee_id: null,
         first_name: first_name.trim(),
@@ -797,11 +792,11 @@ exports.createSystemAdmin = async (req, res) => {
 
       await recordFacilityAssignment({
         userId: createdUser.id,
-        facilityId: nationalFacility.id,
+        facilityId: kayOneFacility.id,
         roleId: role.id,
         startedAt: new Date(),
         transferredBy: req.user.id,
-        notes: 'National system administrator — manages all state hospitals and clinics',
+        notes: 'Kay-One Dental system administrator',
         transaction,
       });
 
@@ -1124,25 +1119,18 @@ exports.getDashboard = async (req, res) => {
         selectedFacility = await Facility.findOne({
           where: {
             id: facilityId,
-            name: { [Op.ne]: NATIONAL_ADMIN_FACILITY_NAME },
+            name: KAY_ONE_FACILITY_NAME,
           },
           attributes: ['id', 'name', 'type', 'province', 'district'],
         });
         if (!selectedFacility) return error(res, 'Facility not found', 404);
+      } else {
+        selectedFacility = await resolveKayOneFacility();
       }
 
-      const nationalOfficeId = await getNationalOfficeFacilityId();
-      const operationalFacilityWhere = nationalOfficeId
-        ? { id: { [Op.ne]: nationalOfficeId } }
-        : { name: { [Op.ne]: NATIONAL_ADMIN_FACILITY_NAME } };
-
-      const staffBaseWhere = selectedFacility
-        ? { facility_id: selectedFacility.id }
-        : (nationalOfficeId ? { facility_id: { [Op.ne]: nationalOfficeId } } : {});
-
-      const visitScopeWhere = selectedFacility
-        ? { facility_id: selectedFacility.id }
-        : {};
+      const kayOneId = selectedFacility.id;
+      const staffBaseWhere = { facility_id: kayOneId };
+      const visitScopeWhere = { facility_id: kayOneId };
 
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -1158,7 +1146,7 @@ exports.getDashboard = async (req, res) => {
         facilitySummaries,
         analytics,
       ] = await Promise.all([
-        Facility.count({ where: operationalFacilityWhere }),
+        Facility.count({ where: { name: KAY_ONE_FACILITY_NAME } }),
         User.count({
           where: { ...staffBaseWhere, is_active: true },
           include: [{
@@ -1181,7 +1169,7 @@ exports.getDashboard = async (req, res) => {
           where: {
             status: { [Op.in]: ['closed', 'discrepancy'] },
             reconciled_by: null,
-            ...(selectedFacility ? { facility_id: selectedFacility.id } : {}),
+            ...(selectedFacility ? { facility_id: kayOneId } : {}),
           },
         }),
         SocialWorkerCase.count({ where: { status: { [Op.in]: ['open', 'in_progress'] } } }),
@@ -1190,7 +1178,7 @@ exports.getDashboard = async (req, res) => {
             `SELECT COUNT(DISTINCT p.id) AS count FROM patients p
              INNER JOIN visits v ON v.patient_id = p.id
              WHERE v.facility_id = :facilityId`,
-            { replacements: { facilityId: selectedFacility.id } }
+            { replacements: { facilityId: kayOneId } }
           ).then(([rows]) => parseInt(rows[0]?.count, 10) || 0)
           : Patient.count(),
         Visit.count({
@@ -1200,11 +1188,11 @@ exports.getDashboard = async (req, res) => {
           },
         }),
         fetchFacilitySummaries(),
-        fetchDashboardAnalytics(selectedFacility?.id || null),
+        fetchDashboardAnalytics(kayOneId),
       ]);
 
       return success(res, {
-        scope: selectedFacility ? 'facility' : 'facilities',
+        scope: 'facility',
         selectedFacility: selectedFacility ? {
           id: selectedFacility.id,
           name: selectedFacility.name,
@@ -1263,6 +1251,7 @@ exports.getDashboard = async (req, res) => {
       queueStats,
     });
   } catch (err) {
+    console.error('getDashboard error:', err);
     return error(res, 'Failed to fetch dashboard', 500);
   }
 };

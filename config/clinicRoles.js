@@ -39,12 +39,17 @@ function isClinicFacility(facility) {
   return facility?.type === 'clinic';
 }
 
+/** Kay One outpatient sites — daily visit window (clinic + health_center). */
+function isOutpatientDayBoundFacility(facility) {
+  return facility?.type === 'clinic' || facility?.type === 'health_center';
+}
+
 function isHospitalFacility(facility) {
-  return facility?.type === 'hospital' || facility?.type === 'health_center';
+  return facility?.type === 'hospital';
 }
 
 function getAllowedRoleSlugsForFacility(facility) {
-  if (isClinicFacility(facility) || isHospitalFacility(facility)) {
+  if (isOutpatientDayBoundFacility(facility) || isHospitalFacility(facility)) {
     return CLINIC_ROLE_SLUGS;
   }
   return [];
@@ -68,6 +73,7 @@ module.exports = {
   isAuthorizedClinicRole,
   isSharedRole,
   isClinicFacility,
+  isOutpatientDayBoundFacility,
   isHospitalFacility,
   getAllowedRoleSlugsForFacility,
   isRoleAllowedAtFacility,

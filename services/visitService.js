@@ -7,9 +7,16 @@
 
 const { Op } = require('sequelize');
 const { Visit, QueueEntry } = require('../models');
-const { expireClinicVisit, isVisitPastClinicDeadline } = require('./clinicVisitExpiryService');
+const {
+  expireClinicVisit,
+  isVisitPastClinicDeadline,
+  expireVisitsBeforeClinicDayAtFacility,
+  expireVisitEndOfClinicDay,
+  isVisitBeforeClinicDay,
+  startOfClinicDay,
+} = require('./clinicVisitExpiryService');
 const { expireHospitalVisit, isVisitPastHospitalDeadline } = require('./hospitalVisitExpiryService');
-const { isClinicFacility, isHospitalFacility } = require('../config/clinicRoles');
+const { isClinicFacility, isHospitalFacility, isOutpatientDayBoundFacility } = require('../config/clinicRoles');
 
 const ACTIVE_VISIT_STATUSES = ['in_progress'];
 const ACTIVE_QUEUE_STATUSES = ['waiting', 'in_progress'];
@@ -172,6 +179,11 @@ async function reconcileStaleQueueVisit(activeVisit, transaction = null) {
 async function reconcileFacilityStaleVisits(facilityId, transaction = null) {
   if (!facilityId) return 0;
 
+  const facility = await require('../models').Facility.findByPk(facilityId, { transaction });
+  if (isOutpatientDayBoundFacility(facility)) {
+    await expireVisitsBeforeClinicDayAtFacility(facilityId, { transaction });
+  }
+
   const visits = await Visit.findAll({
     where: {
       facility_id: facilityId,
@@ -216,10 +228,18 @@ async function getActiveVisitContext(patientId, facilityId, transaction = null) 
   let activeVisit = await findActiveVisitForPatient(patientId, facilityId, transaction);
   if (activeVisit) {
     const facility = await require('../models').Facility.findByPk(facilityId, { transaction });
-    if (isClinicFacility(facility) && isVisitPastClinicDeadline(activeVisit)) {
-      await expireClinicVisit(activeVisit, { transaction });
-      activeVisit = await findActiveVisitForPatient(patientId, facilityId, transaction);
-      if (activeVisit?.status !== 'in_progress') activeVisit = null;
+    if (isOutpatientDayBoundFacility(facility)) {
+      if (isVisitBeforeClinicDay(activeVisit)) {
+        await expireVisitEndOfClinicDay(activeVisit, { transaction });
+        activeVisit = await findActiveVisitForPatient(patientId, facilityId, transaction);
+      } else if (isVisitPastClinicDeadline(activeVisit)) {
+        await expireClinicVisit(activeVisit, { transaction });
+        activeVisit = await findActiveVisitForPatient(patientId, facilityId, transaction);
+        if (activeVisit?.status !== 'in_progress') activeVisit = null;
+      } else {
+        await reconcileStaleQueueVisit(activeVisit, transaction);
+        activeVisit = await findActiveVisitForPatient(patientId, facilityId, transaction);
+      }
     } else if (isHospitalFacility(facility) && isVisitPastHospitalDeadline(activeVisit)) {
       await expireHospitalVisit(activeVisit, { transaction });
       activeVisit = await findActiveVisitForPatient(patientId, facilityId, transaction);
@@ -270,13 +290,20 @@ async function assertNoActiveVisitForPatient(patientId, facilityId, transaction 
 function serializeActiveVisitSummary(visit, queueEntry = null) {
   if (!visit) return null;
   const row = visit.toJSON ? visit.toJSON() : visit;
+  const queueDepartment = queueEntry?.department || null;
+  const queueStatus = queueEntry?.status || null;
+  const department = queueDepartment || row.current_department;
+  const inDoctorQueue =
+    department === 'doctor' && ['waiting', 'in_progress'].includes(queueStatus);
   return {
     id: row.id,
     visit_number: row.visit_number,
     status: row.status,
     current_department: row.current_department,
-    queue_department: queueEntry?.department || null,
-    queue_status: queueEntry?.status || null,
+    queue_department: queueDepartment,
+    queue_status: queueStatus,
+    in_doctor_queue: inDoctorQueue,
+    consultation_in_progress: inDoctorQueue && queueStatus === 'in_progress',
     is_stale_location: Boolean(!queueEntry && row.current_department),
   };
 }

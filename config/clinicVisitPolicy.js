@@ -7,6 +7,9 @@ const CLINIC_VISIT_MAX_MS = CLINIC_VISIT_MAX_HOURS * 60 * 60 * 1000;
 const AUTO_CLOSE_QUEUE_NOTE =
   'Auto-closed: 24-hour clinic visit window expired since front office intake.';
 
+const END_OF_DAY_CLOSE_QUEUE_NOTE =
+  'Auto-closed: visit was not completed before end of clinic day.';
+
 const HOSPITAL_AUTO_CLOSE_QUEUE_NOTE =
   'Auto-closed: 24-hour hospital visit window expired since front office intake.';
 
@@ -14,5 +17,6 @@ module.exports = {
   CLINIC_VISIT_MAX_HOURS,
   CLINIC_VISIT_MAX_MS,
   AUTO_CLOSE_QUEUE_NOTE,
+  END_OF_DAY_CLOSE_QUEUE_NOTE,
   HOSPITAL_AUTO_CLOSE_QUEUE_NOTE,
 };

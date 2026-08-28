@@ -144,7 +144,10 @@ exports.exportMedicalHistory = async (req, res) => {
     const patient = await Patient.findByPk(req.params.id);
     if (!patient) return error(res, 'Patient not found', 404);
 
-    const buffer = await buildMedicalHistoryXlsx(patient.id, null, scope);
+    const excludePaymentSummary = req.query.exclude_payment === '1';
+    const buffer = await buildMedicalHistoryXlsx(patient.id, null, scope, {
+      excludePaymentSummary,
+    });
     const safeNumber = (patient.patient_number || patient.id).replace(/[^\w-]+/g, '_');
     const filename = `medical-card-${safeNumber}-${scope}.xlsx`;
 
@@ -165,10 +168,12 @@ exports.exportMedicalHistory = async (req, res) => {
 exports.getMedicalCard = async (req, res) => {
   try {
     const visitId = (req.query.visit_id || '').trim() || null;
+    const includeBilling = req.query.exclude_payment !== '1';
     const card = await buildMedicalCardDocument(req.params.id, {
       facilityId: null,
       visitId,
       allFacilities: true,
+      includeBilling,
     });
     return success(res, card);
   } catch (err) {
