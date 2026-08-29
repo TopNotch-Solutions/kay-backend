@@ -59,13 +59,12 @@ const limiter = rateLimit({
 });
 app.use('/api', limiter);
 
-// Routes — Kay One: auth, front office, doctor, system admin (+ shared patient/queue/inventory/icd10/reports)
+// Routes — Kay One: auth, front office, doctor, system admin (+ shared patient/queue/inventory/reports)
 app.use('/api/v1/auth', require('./routes/auth.routes'));
 app.use('/api/v1/patients', require('./routes/patient.routes'));
 app.use('/api/v1/front-office', require('./routes/frontOffice.routes'));
 app.use('/api/v1/queue', require('./routes/queue.routes'));
 app.use('/api/v1/consultations', require('./routes/doctor.routes'));
-app.use('/api/v1/icd10', require('./routes/icd10.routes'));
 app.use('/api/v1/inventory', require('./routes/inventory.routes'));
 app.use('/api/v1/admin', require('./routes/admin.routes'));
 app.use('/api/v1/reports', require('./routes/userReport.routes'));

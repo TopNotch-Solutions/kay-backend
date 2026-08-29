@@ -91,6 +91,28 @@ function normalizeDentalExam(raw) {
   const investigations = raw.investigations || {};
   const xrayPerformed = Boolean(investigations.xray_performed);
   const bloodTestPerformed = Boolean(investigations.blood_test_performed);
+  const validChartConditions = new Set(['filling', 'caries', 'extracted', 'rootcanal']);
+
+  function normalizeDentalCharting(charting) {
+    if (!charting || typeof charting !== 'object') return null;
+    const out = {};
+    ['pre_treatment', 'completed_treatment'].forEach((phase) => {
+      const phaseRaw = charting[phase];
+      if (!phaseRaw || typeof phaseRaw !== 'object') return;
+      const phaseOut = {};
+      Object.entries(phaseRaw).forEach(([sectionId, teeth]) => {
+        if (!teeth || typeof teeth !== 'object') return;
+        const cleaned = {};
+        Object.entries(teeth).forEach(([tooth, condition]) => {
+          if (validChartConditions.has(condition)) cleaned[String(tooth)] = condition;
+        });
+        if (Object.keys(cleaned).length) phaseOut[sectionId] = cleaned;
+      });
+      if (Object.keys(phaseOut).length) out[phase] = phaseOut;
+    });
+    return Object.keys(out).length ? out : null;
+  }
+
   const followRaw = raw.follow_up;
   let follow_up = null;
   if (followRaw && typeof followRaw === 'object') {
@@ -131,6 +153,9 @@ function normalizeDentalExam(raw) {
         ? (String(investigations.blood_test_results || '').trim().slice(0, 700) || null)
         : null,
     },
+    ...(normalizeDentalCharting(raw.dental_charting)
+      ? { dental_charting: normalizeDentalCharting(raw.dental_charting) }
+      : {}),
     ...(follow_up ? { follow_up } : {}),
   };
 }
