@@ -28,7 +28,11 @@ const {
   emitQueueEvents,
   EMERGENCY_UNIT_DEPARTMENT,
 } = require('../utils/patientRouting');
-const { patientHasScheduledFollowUp, scheduledFollowUpFlagsForPatients } = require('../services/followUpAppointmentService');
+const {
+  patientHasScheduledFollowUp,
+  scheduledFollowUpFlagsForPatients,
+  fulfillFollowUpAppointmentForPatient,
+} = require('../services/followUpAppointmentService');
 const { isHospitalFacility } = require('../config/clinicRoles');
 const { HOSPITAL_OUTPATIENT_DEPARTMENTS } = require('../config/hospitalOutpatientConfig');
 
@@ -663,6 +667,22 @@ exports.createVisit = async (req, res) => {
       pushed_by: req.user.id,
       notes: buildIntakeNotes(req.body, routing),
     }, t);
+
+    if (hasScheduledFollowUp && visitType === 'follow_up') {
+      const actorName = [req.user.first_name, req.user.last_name].filter(Boolean).join(' ').trim()
+        || req.user.email
+        || null;
+      await fulfillFollowUpAppointmentForPatient({
+        patientId: patient.id,
+        facilityId: req.user.facility_id,
+        visitId: visit.id,
+        actorId: req.user.id,
+        actorName,
+        actorRole: req.user.role?.name || 'front_office',
+        now: new Date(),
+        transaction: t,
+      });
+    }
 
     await billingChargeService.chargeAdmissionFee(visit.id, req.user.facility_id, t);
 

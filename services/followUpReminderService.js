@@ -93,13 +93,12 @@ function formatFollowUpDisplay(at) {
   }).format(at);
 }
 
-function buildReminderMessage(reminderType, followUpAt, notes) {
+function buildReminderMessage(reminderType, followUpAt) {
   const when = formatFollowUpDisplay(followUpAt);
-  const noteBit = notes ? ` Note: ${notes.slice(0, 120)}` : '';
   if (reminderType === 'day_before') {
-    return `Kay-One Dental: Reminder — you have a follow-up appointment tomorrow (${when}). Please attend as scheduled.${noteBit}`;
+    return `Kay-One Dental: Reminder — you have a follow-up appointment tomorrow (${when}). Please attend as scheduled.`;
   }
-  return `Kay-One Dental: Reminder — your follow-up appointment is in 3 hours (${when}). Please arrive on time.${noteBit}`;
+  return `Kay-One Dental: Reminder — your follow-up appointment is in 3 hours (${when}). Please arrive on time.`;
 }
 
 function patientPhone(patient) {
@@ -109,6 +108,11 @@ function patientPhone(patient) {
 
 function isFollowUpCancelled(followUp) {
   return String(followUp?.status || '').toLowerCase() === 'cancelled';
+}
+
+function isFollowUpInactive(followUp) {
+  const status = String(followUp?.status || '').toLowerCase();
+  return status === 'cancelled' || status === 'attended' || status === 'completed';
 }
 
 /**
@@ -128,7 +132,7 @@ async function syncFollowUpReminders({
     || (typeof consultation.get === 'function' ? consultation.get('dental_exam') : null);
   const followUp = dentalExam?.follow_up || null;
 
-  if (isFollowUpCancelled(followUp)) {
+  if (isFollowUpInactive(followUp)) {
     const [cancelled] = await FollowUpReminder.update(
       { status: 'cancelled' },
       {
@@ -196,7 +200,7 @@ async function syncFollowUpReminders({
       // Appointment too soon for this reminder window — skip.
       continue;
     }
-    const message = buildReminderMessage(row.reminder_type, validated.at, validated.notes);
+    const message = buildReminderMessage(row.reminder_type, validated.at);
     const existing = await FollowUpReminder.findOne({
       where: {
         consultation_id: consultation.id,

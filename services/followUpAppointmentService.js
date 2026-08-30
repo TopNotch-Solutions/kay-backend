@@ -36,8 +36,22 @@ function isFollowUpCancelled(followUp) {
   return String(followUp?.status || '').toLowerCase() === 'cancelled';
 }
 
+function isFollowUpFulfilled(followUp) {
+  const status = String(followUp?.status || '').toLowerCase();
+  return status === 'attended' || status === 'completed';
+}
+
+function followUpSortKey(followUp) {
+  const at = parseFollowUpAt(followUp.date, followUp.time);
+  if (at) return at.getTime();
+  const date = String(followUp.date || '').trim();
+  return date ? new Date(`${date}T23:59:59+02:00`).getTime() : Number.MAX_SAFE_INTEGER;
+}
+
 function isFutureFollowUp(followUp, now = new Date()) {
-  if (!followUp || typeof followUp !== 'object' || isFollowUpCancelled(followUp)) return false;
+  if (!followUp || typeof followUp !== 'object' || isFollowUpCancelled(followUp) || isFollowUpFulfilled(followUp)) {
+    return false;
+  }
   const date = String(followUp.date || '').trim();
   if (!date) return false;
   const today = todayInClinicTz(now);
@@ -323,6 +337,11 @@ async function cancelFollowUpAppointment({
     err.status = 409;
     throw err;
   }
+  if (isFollowUpFulfilled(followUp)) {
+    const err = new Error('This appointment has already been attended.');
+    err.status = 409;
+    throw err;
+  }
   if (!isFutureFollowUp(followUp, now)) {
     const err = new Error('Only future appointments can be cancelled.');
     err.status = 400;
@@ -589,6 +608,100 @@ async function cancelFollowUpAppointmentsForDate({
   };
 }
 
+/**
+ * Mark the patient's next due follow-up as attended when they check in at front office.
+ * Prefers today's appointment; otherwise fulfills the earliest upcoming one.
+ */
+async function fulfillFollowUpAppointmentForPatient({
+  patientId,
+  facilityId,
+  visitId,
+  actorId,
+  actorName = null,
+  actorRole = 'front_office',
+  now = new Date(),
+  transaction = null,
+} = {}) {
+  if (!patientId || !facilityId || !visitId || !actorId) {
+    const err = new Error('Patient, facility, visit, and actor are required.');
+    err.status = 400;
+    throw err;
+  }
+
+  const consultations = await Consultation.findAll({
+    where: { dental_exam: { [Op.ne]: null } },
+    include: [
+      {
+        model: Visit,
+        as: 'visit',
+        where: { facility_id: facilityId, patient_id: patientId },
+        required: true,
+      },
+    ],
+    transaction,
+  });
+
+  const candidates = consultations
+    .map((row) => ({ consultation: row, followUp: row.dental_exam?.follow_up }))
+    .filter(({ followUp }) => isFutureFollowUp(followUp, now))
+    .sort((a, b) => followUpSortKey(a.followUp) - followUpSortKey(b.followUp));
+
+  if (!candidates.length) {
+    return { fulfilled_count: 0, consultation_ids: [] };
+  }
+
+  const today = todayInClinicTz(now);
+  const todayMatch = candidates.find(({ followUp }) => followUp.date === today);
+  const { consultation, followUp } = todayMatch || candidates[0];
+
+  const performedByName = await resolveActorName(actorId, actorName);
+  const historyEntry = {
+    action: 'attended',
+    at: now.toISOString(),
+    by: actorId,
+    by_name: performedByName,
+    by_role: actorRole,
+    from_date: followUp.date,
+    from_time: followUp.time || null,
+    visit_id: visitId,
+  };
+
+  const dentalExam = consultation.dental_exam || {};
+  const updatedDentalExam = {
+    ...dentalExam,
+    follow_up: {
+      ...followUp,
+      status: 'attended',
+      attended_at: now.toISOString(),
+      attended_visit_id: visitId,
+      attended_by: actorId,
+      attended_by_name: performedByName,
+      attended_by_role: actorRole,
+      history: appendFollowUpHistory(followUp, historyEntry),
+    },
+  };
+
+  await consultation.update({ dental_exam: updatedDentalExam }, { transaction });
+
+  await FollowUpReminder.update(
+    { status: 'cancelled' },
+    {
+      where: { consultation_id: consultation.id, status: 'pending' },
+      transaction,
+    }
+  );
+
+  return {
+    fulfilled_count: 1,
+    consultation_id: consultation.id,
+    consultation_ids: [consultation.id],
+    follow_up: {
+      date: followUp.date,
+      time: followUp.time || null,
+    },
+  };
+}
+
 module.exports = {
   listFutureAppointmentsForDoctor,
   listFutureAppointmentsForFacility,
@@ -596,6 +709,8 @@ module.exports = {
   cancelFollowUpAppointmentsForDate,
   patientHasScheduledFollowUp,
   scheduledFollowUpFlagsForPatients,
+  fulfillFollowUpAppointmentForPatient,
   isFutureFollowUp,
   isFollowUpCancelled,
+  isFollowUpFulfilled,
 };
