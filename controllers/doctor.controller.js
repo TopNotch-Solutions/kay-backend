@@ -30,7 +30,19 @@ const { assertFollowUpIsFuture, syncFollowUpReminders } = require('../services/f
 const {
   listFutureAppointmentsForDoctor,
   cancelFollowUpAppointment,
+  cancelFollowUpAppointmentsForDate,
 } = require('../services/followUpAppointmentService');
+
+function appointmentActorContext(req, fallbackRole = 'doctor') {
+  const actorName = [req.user.first_name, req.user.last_name].filter(Boolean).join(' ').trim()
+    || req.user.email
+    || null;
+  return {
+    actorId: req.user.id,
+    actorName,
+    actorRole: req.user.role?.name || fallbackRole,
+  };
+}
 const {
   resolveDischargeDiagnosis,
   buildRefusalDischargeNotes,
@@ -2292,9 +2304,13 @@ exports.cancelAppointment = async (req, res) => {
       follow_up_date,
       follow_up_time,
     } = req.body || {};
+    const actor = appointmentActorContext(req);
     const result = await cancelFollowUpAppointment({
       consultationId: req.params.consultationId,
-      doctorId: req.user.id,
+      actorId: actor.actorId,
+      actorName: actor.actorName,
+      actorRole: actor.actorRole,
+      requireDoctorOwnership: true,
       reason,
       reschedule: Boolean(reschedule),
       follow_up_date,
@@ -2315,5 +2331,47 @@ exports.cancelAppointment = async (req, res) => {
     console.error('Cancel appointment error:', err);
     const status = err.status || 500;
     return error(res, err.message || 'Failed to cancel appointment', status);
+  }
+};
+
+exports.cancelAppointmentsByDate = async (req, res) => {
+  try {
+    const {
+      date,
+      reason,
+      reschedule,
+      reschedules,
+    } = req.body || {};
+    const actor = appointmentActorContext(req);
+    const result = await cancelFollowUpAppointmentsForDate({
+      actorId: actor.actorId,
+      actorName: actor.actorName,
+      actorRole: actor.actorRole,
+      doctorId: req.user.id,
+      requireDoctorOwnership: true,
+      date,
+      reason,
+      reschedule: Boolean(reschedule),
+      reschedules,
+    });
+
+    const actionLabel = result.rescheduled ? 'Rescheduled' : 'Cancelled';
+    const count = result.processed_count;
+    let message;
+    if (result.failures.length > 0) {
+      message = `${actionLabel} ${count} of ${result.requested_count} appointments. ${result.sms_sent_count} SMS sent. ${result.failures.length} could not be updated.`;
+    } else if (result.sms_sent_count === count) {
+      message = `${actionLabel} ${count} appointment${count === 1 ? '' : 's'} and sent SMS to each patient.`;
+    } else if (result.sms_sent_count > 0) {
+      message = `${actionLabel} ${count} appointment${count === 1 ? '' : 's'}. SMS sent to ${result.sms_sent_count} patient${result.sms_sent_count === 1 ? '' : 's'}.`;
+    } else {
+      message = `${actionLabel} ${count} appointment${count === 1 ? '' : 's'}. No cell phones on file — SMS was not sent.`;
+    }
+
+    return success(res, result, message);
+  } catch (err) {
+    console.error('Cancel appointments by date error:', err);
+    const status = err.status || 500;
+    return error(res, err.message || 'Failed to update appointments', status);
   }
 };

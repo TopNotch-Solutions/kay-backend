@@ -8,6 +8,12 @@ router.use(authenticate);
 
 router.get('/appointments', authorize('consultation', 'read'), doctorController.listAppointments);
 router.post(
+  '/appointments/cancel-by-date',
+  authorize('consultation', 'update'),
+  auditMiddleware('consultation'),
+  doctorController.cancelAppointmentsByDate
+);
+router.post(
   '/appointments/:consultationId/cancel',
   authorize('consultation', 'update'),
   auditMiddleware('consultation'),

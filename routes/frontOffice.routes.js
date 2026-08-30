@@ -29,4 +29,22 @@ router.post(
   frontOfficeController.verifyConsentOtp
 );
 
+router.get(
+  '/appointments',
+  authorize('patient', 'read'),
+  frontOfficeController.listAppointments
+);
+
+router.post(
+  '/appointments/cancel-by-date',
+  authorize('patient', 'update'),
+  frontOfficeController.cancelAppointmentsByDate
+);
+
+router.post(
+  '/appointments/:consultationId/cancel',
+  authorize('patient', 'update'),
+  frontOfficeController.cancelAppointment
+);
+
 module.exports = router;

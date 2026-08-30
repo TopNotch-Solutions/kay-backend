@@ -28,6 +28,7 @@ const {
   emitQueueEvents,
   EMERGENCY_UNIT_DEPARTMENT,
 } = require('../utils/patientRouting');
+const { patientHasScheduledFollowUp, scheduledFollowUpFlagsForPatients } = require('../services/followUpAppointmentService');
 const { isHospitalFacility } = require('../config/clinicRoles');
 const { HOSPITAL_OUTPATIENT_DEPARTMENTS } = require('../config/hospitalOutpatientConfig');
 
@@ -374,6 +375,10 @@ exports.search = async (req, res) => {
     await visitService.reconcileFacilityStaleVisits(req.user.facility_id);
 
     const pendingFlags = await pendingMedicationFlagsForPatients(rows.map((p) => p.id));
+    const followUpFlags = await scheduledFollowUpFlagsForPatients(
+      rows.map((p) => p.id),
+      req.user.facility_id
+    );
 
     const patients = await Promise.all(
       rows.map(async (p) => {
@@ -387,6 +392,7 @@ exports.search = async (req, res) => {
           profile_complete: isProfileComplete(p),
           has_active_visit: Boolean(activeVisit),
           has_pending_medication: pendingFlags.get(p.id) || false,
+          has_scheduled_follow_up: followUpFlags.get(p.id) || false,
           active_visit: visitService.serializeActiveVisitSummary(activeVisit, activeQueue),
         };
       })
@@ -627,7 +633,17 @@ exports.createVisit = async (req, res) => {
     if (routing.isEmergency) patientUpdates.is_emergency = true;
     await patient.update(patientUpdates, { transaction: t });
 
-    const visitType = routing.immediateTriage || routing.isEmergency ? 'emergency' : 'follow_up';
+    const hasScheduledFollowUp = await patientHasScheduledFollowUp(
+      patient.id,
+      req.user.facility_id,
+      { now: new Date() }
+    );
+
+    const visitType = routing.immediateTriage || routing.isEmergency
+      ? 'emergency'
+      : hasScheduledFollowUp
+        ? 'follow_up'
+        : 'new';
 
     const visit = await Visit.create({
       id: uuidv4(),
